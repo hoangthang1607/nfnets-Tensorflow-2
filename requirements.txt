@@ -1,7 +1,9 @@
 Pillow
-numpy
+numpy>=1.18.0
 opencv_contrib_python
-tensorflow-datasets==4.0.1
+tensorflow-datasets>=4.1.0
 tensorflow-addons==0.12.1
+tensorflow-probability>=0.12.1
 keras-tuner==1.0.2
 pandas==1.1.5
+ml_collections>=0.1
