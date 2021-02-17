@@ -9,34 +9,40 @@ class WSConv2D(tf.keras.layers.Conv2D):
 
     def __init__(self, *args, **kwargs):
         super(WSConv2D, self).__init__(
-            kernel_initializer="he_normal", *args, **kwargs
+            kernel_initializer=tf.keras.initializers.VarianceScaling(
+                scale=1.0, mode='fan_in', distribution='untruncated_normal',
+            ), *args, **kwargs
         )
-
-    def standardize_weight(self, weight, eps):
-        mean = tf.math.reduce_mean(weight, axis=(0, 1, 2), keepdims=True)
-        var = tf.math.reduce_variance(weight, axis=(0, 1, 2), keepdims=True)
-        fan_in = np.prod(weight.shape[:-1])
         # Get gain
-        gain = self.add_weight(
+        self.gain = self.add_weight(
             name='gain',
-            shape=(weight.shape[-1],),
+            shape=(self.filters,),
             initializer="ones",
             trainable=True,
             dtype=self.dtype
         )
+
+    def standardize_weight(self, eps):
+        mean = tf.math.reduce_mean(self.kernel, axis=(0, 1, 2), keepdims=True)
+        var = tf.math.reduce_variance(self.kernel, axis=(0, 1, 2), keepdims=True)
+        fan_in = np.prod(self.kernel.shape[:-1])
+
         # Manually fused normalization, eq. to (w - mean) * gain / sqrt(N * var)
         scale = tf.math.rsqrt(
             tf.math.maximum(
                 var * fan_in,
                 tf.convert_to_tensor(eps, dtype=self.dtype)
             )
-        ) * gain
+        ) * self.gain
         shift = mean * scale
-        return weight * scale - shift
+        return self.kernel * scale - shift
 
     def call(self, inputs, eps=1e-4):
-        self.kernel.assign(self.standardize_weight(self.kernel, eps))
-        return super().call(inputs)
+        weight = self.standardize_weight(eps)
+        return tf.nn.conv2d(
+            inputs, weight, strides=self.strides,
+            padding=self.padding.upper(), dilations=self.dilation_rate
+        ) + self.bias
 
 
 class SqueezeExcite(tf.keras.Model):
@@ -75,7 +81,7 @@ class StochDepth(tf.keras.Model):
     def call(self, x, training):
         if not training:
             return x
-        batch_size = x.shape[0]
+        batch_size = tf.shape(x)[0]
         r = tf.random.uniform(shape=[batch_size, 1, 1, 1], dtype=x.dtype)
         keep_prob = 1. - self.drop_rate
         binary_tensor = tf.floor(keep_prob + r)
