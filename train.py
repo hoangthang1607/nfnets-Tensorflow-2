@@ -76,7 +76,7 @@ def main(args):
         label_smoothing=args.label_smoothing,
         ema_decay=args.ema_decay,
     )
-    model.build((1, 224, 224, 3))
+    model.build((1, train_imsize, train_imsize, 3))
     lr_decayed_fn = tf.keras.experimental.CosineDecay(
         initial_learning_rate=max_lr,
         decay_steps=training_steps - 5 * steps_per_epoch,
