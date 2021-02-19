@@ -94,50 +94,22 @@ nfnet_params.update(
 # Note that not all nonlinearities will be stable, especially if they are
 # not perfectly monotonic. Good choices include relu, silu, and gelu.
 nonlinearities = {
-    "identity": tf.keras.layers.Lambda(lambda x: x),
-    "celu": tf.keras.layers.Lambda(
-        lambda x: tf.nn.crelu(x) * 1.270926833152771
-    ),
-    "elu": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.elu(x) * 1.2716004848480225
-    ),
-    "gelu": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.gelu(x) * 1.7015043497085571
-    ),
+    "identity": lambda x: x,
+    "celu": lambda x: tf.nn.crelu(x) * 1.270926833152771,
+    "elu": lambda x: tf.keras.activations.elu(x) * 1.2716004848480225,
+    "gelu": lambda x: tf.keras.activations.gelu(x) * 1.7015043497085571,
     #     'glu': lambda x: jax.nn.glu(x) * 1.8484294414520264,
-    "leaky_relu": tf.keras.layers.Lambda(
-        lambda x: tf.nn.leaky_relu(x) * 1.70590341091156
-    ),
-    "log_sigmoid": tf.keras.layers.Lambda(
-        lambda x: tf.math.log(tf.nn.sigmoid(x)) * 1.9193484783172607
-    ),
-    "log_softmax": tf.keras.layers.Lambda(
-        lambda x: tf.math.log(tf.nn.softmax(x)) * 1.0002083778381348
-    ),
-    "relu": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.relu(x) * 1.7139588594436646
-    ),
-    "relu6": tf.keras.layers.Lambda(
-        lambda x: tf.nn.relu6(x) * 1.7131484746932983
-    ),
-    "selu": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.selu(x) * 1.0008515119552612
-    ),
-    "sigmoid": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.sigmoid(x) * 4.803835391998291
-    ),
-    "silu": tf.keras.layers.Lambda(
-        lambda x: tf.nn.silu(x) * 1.7881293296813965
-    ),
-    "soft_sign": tf.keras.layers.Lambda(
-        lambda x: tf.nn.softsign(x) * 2.338853120803833
-    ),
-    "softplus": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.softplus(x) * 1.9203323125839233
-    ),
-    "tanh": tf.keras.layers.Lambda(
-        lambda x: tf.keras.activations.tanh(x) * 1.5939117670059204
-    ),
+    "leaky_relu": lambda x: tf.nn.leaky_relu(x) * 1.70590341091156,
+    "log_sigmoid": lambda x: tf.math.log(tf.nn.sigmoid(x)) * 1.9193484783172607,
+    "log_softmax": lambda x: tf.math.log(tf.nn.softmax(x)) * 1.0002083778381348,
+    "relu": lambda x: tf.keras.activations.relu(x) * 1.7139588594436646,
+    "relu6": lambda x: tf.nn.relu6(x) * 1.7131484746932983,
+    "selu": lambda x: tf.keras.activations.selu(x) * 1.0008515119552612,
+    "sigmoid": lambda x: tf.keras.activations.sigmoid(x) * 4.803835391998291,
+    "silu": lambda x: tf.nn.silu(x) * 1.7881293296813965,
+    "soft_sign": lambda x: tf.nn.softsign(x) * 2.338853120803833,
+    "softplus": lambda x: tf.keras.activations.softplus(x) * 1.9203323125839233,
+    "tanh": lambda x: tf.keras.activations.tanh(x) * 1.5939117670059204,
 }
 
 
@@ -206,7 +178,7 @@ class NFNet(tf.keras.Model):
                     padding="same",
                     name="stem_conv0",
                 ),
-                self.activation,
+                tf.keras.layers.Lambda(self.activation, name="act_stem_conv0"),
                 self.which_conv(
                     32,
                     kernel_size=3,
@@ -214,7 +186,7 @@ class NFNet(tf.keras.Model):
                     padding="same",
                     name="stem_conv1",
                 ),
-                self.activation,
+                tf.keras.layers.Lambda(self.activation, name="act_stem_conv1"),
                 self.which_conv(
                     64,
                     kernel_size=3,
@@ -222,7 +194,7 @@ class NFNet(tf.keras.Model):
                     padding="same",
                     name="stem_conv2",
                 ),
-                self.activation,
+                tf.keras.layers.Lambda(self.activation, name="act_stem_conv2"),
                 self.which_conv(
                     ch,
                     kernel_size=3,
@@ -313,7 +285,7 @@ class NFNet(tf.keras.Model):
         for i, block in enumerate(self.blocks):
             out, res_avg_var = block(out, training=training)
         # Final-conv->activation, pool, dropout, classify
-        out = self.activation(self.final_conv(out))
+        out = tf.keras.layers.Lambda(self.activation)(self.final_conv(out))
         pool = tf.math.reduce_mean(out, [1, 2])
         outputs["pool"] = pool
         # Optionally apply dropout
@@ -349,6 +321,19 @@ class NFNet(tf.keras.Model):
             self.ema.apply(self.trainable_variables)
         self.compiled_metrics.update_state(y_true, y_pred["logits"])
 
+        return {m.name: m.result() for m in self.metrics}
+
+    def test_step(self, data):
+        # Unpack the data
+        x, y_true = data
+        # Compute predictions
+        y_pred = self(x, training=False)
+        # Updates the metrics tracking the loss
+        self.compiled_loss(y_true, y_pred["logits"])
+        # Update the metrics.
+        self.compiled_metrics.update_state(y_true, y_pred["logits"])
+        # Return a dict mapping metric names to current value.
+        # Note that it will include the loss (tracked in self.metrics).
         return {m.name: m.result() for m in self.metrics}
 
 
@@ -441,7 +426,7 @@ class NFBlock(tf.keras.Model):
         )
 
     def call(self, x, training):
-        out = self.activation(x) * self.beta
+        out = tf.keras.layers.Lambda(self.activation)(x) * self.beta
         if self.stride > 1:  # Average-pool downsample.
             shortcut = tf.keras.layers.AveragePooling2D(
                 pool_size=(2, 2), strides=(2, 2), padding="same"
@@ -453,10 +438,10 @@ class NFBlock(tf.keras.Model):
         else:
             shortcut = x
         out = self.conv0(out)
-        out = self.conv1(self.activation(out))
+        out = self.conv1(tf.keras.layers.Lambda(self.activation)(out))
         if self.use_two_convs:
-            out = self.conv1b(self.activation(out))
-        out = self.conv2(self.activation(out))
+            out = self.conv1b(tf.keras.layers.Lambda(self.activation)(out))
+        out = self.conv2(tf.keras.layers.Lambda(self.activation)(out))
         out = (self.se(out) * 2) * out  # Multiply by 2 for rescaling
         # Get average residual standard deviation for reporting metrics.
         res_avg_var = tf.math.reduce_mean(
