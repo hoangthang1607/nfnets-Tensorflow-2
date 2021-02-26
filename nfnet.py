@@ -139,6 +139,7 @@ class NFNet(tf.keras.Model):
         name="NFNet",
         label_smoothing=0.1,
         ema_decay=0.99999,
+        clipping_factor=0.01,
     ):
         super(NFNet, self).__init__(name=name)
         self.num_classes = num_classes
@@ -167,6 +168,7 @@ class NFNet(tf.keras.Model):
             label_smoothing / num_classes, dtype=tf.float32
         )
         self.ema = tf.train.ExponentialMovingAverage(decay=ema_decay)
+        self.clipping_factor = clipping_factor
         # Stem
         ch = self.width_pattern[0] // 2
         self.stem = tf.keras.Sequential(
@@ -305,7 +307,7 @@ class NFNet(tf.keras.Model):
         clipped_gradients = [
             grad
             if ("dense" in weight.name and "squeeze_excite" not in weight.name)
-            else clip_gradient(grad, weight)
+            else clip_gradient(grad, weight, clipping=self.clipping_factor)
             for grad, weight in zip(gradients, self.trainable_weights)
         ]
         # https://www.tensorflow.org/addons/api_docs/python/tfa/optimizers/SGDW

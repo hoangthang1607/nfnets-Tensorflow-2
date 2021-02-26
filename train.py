@@ -44,6 +44,20 @@ def parse_args():
         help="label_smoothing",
     )
     ap.add_argument(
+        "-lr",
+        "--learning_rate",
+        default=0.1,
+        type=float,
+        help="learning rate",
+    )
+    ap.add_argument(
+        "-d",
+        "--drop_rate",
+        default=0.2,
+        type=float,
+        help="drop rate",
+    )
+    ap.add_argument(
         "-e",
         "--ema_decay",
         default=0.99999,
@@ -67,14 +81,16 @@ def main(args):
     test_imsize = nfnet_params[args.variant]["test_imsize"]
     aug_base_name = "cutmix_mixup_randaugment"
     augment_name = f"{aug_base_name}_{nfnet_params[args.variant]['RA_level']}"
-    max_lr = 0.1 * args.batch_size / 256
+    max_lr = args.learning_rate * args.batch_size / 256
     eval_preproc = "resize_crop_32"
 
     model = NFNet(
         num_classes=1000,
         variant=args.variant,
+        drop_rate=args.drop_rate,
         label_smoothing=args.label_smoothing,
         ema_decay=args.ema_decay,
+        clipping_factor=args.clipping
     )
     model.build((1, train_imsize, train_imsize, 3))
     lr_decayed_fn = tf.keras.experimental.CosineDecay(
